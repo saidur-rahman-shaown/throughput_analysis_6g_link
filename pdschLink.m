@@ -17,17 +17,17 @@ function resultsPerWorker = pdschLink(simParameters,totalNumSlots,workerId)
     ofdmInfo = hpre6GOFDMInfo(carrier);
         
     % Create CDL channel
-    channel = nrCDLChannel;
-    channel = hArrayGeometry(channel,simParameters.NTxAnts,simParameters.NRxAnts);
-    nTxAnts = prod(channel.TransmitAntennaArray.Size);
-    nRxAnts = prod(channel.ReceiveAntennaArray.Size);
-    channel.DelayProfile = simParameters.DelayProfile;
-    channel.DelaySpread = simParameters.DelaySpread;
-    channel.MaximumDopplerShift = simParameters.MaximumDopplerShift;
-    channel.SampleRate = ofdmInfo.SampleRate;
-    % New seed for each worker, but the same for each SNR point so they all
-    % experience the same channel realization.
-    channel.Seed = randi([0 2^32-1]);
+    channel = simParameters.Channel;
+    % channel = hArrayGeometry(channel,simParameters.NTxAnts,simParameters.NRxAnts);
+    % nTxAnts = prod(channel.TransmitAntennaArray.Size);
+    % nRxAnts = prod(channel.ReceiveAntennaArray.Size);
+    % channel.DelayProfile = simParameters.DelayProfile;
+    % channel.DelaySpread = simParameters.DelaySpread;
+    % channel.MaximumDopplerShift = simParameters.MaximumDopplerShift;
+    % channel.SampleRate = ofdmInfo.SampleRate;
+    % % New seed for each worker, but the same for each SNR point so they all
+    % % experience the same channel realization.
+    % channel.Seed = randi([0 2^32-1]);
 
     chInfo = info(channel);
     maxChDelay = chInfo.MaximumChannelDelay;
@@ -45,7 +45,7 @@ function resultsPerWorker = pdschLink(simParameters,totalNumSlots,workerId)
 
         % Noise power calculation
         SNR = 10^(simParameters.SNRdB(snrIdx)/10); % Calculate linear noise gain
-        N0 = 1/sqrt(double(ofdmInfo.Nfft)*SNR*nRxAnts);
+        N0 = 1/sqrt(double(ofdmInfo.Nfft)*SNR*simParameters.NRxAnts);
         % Get noise power per resource element (RE) from noise power in the
         % time domain (N0^2)
         nPowerPerRE = N0^2*ofdmInfo.Nfft;
@@ -62,7 +62,7 @@ function resultsPerWorker = pdschLink(simParameters,totalNumSlots,workerId)
 
         % Obtain a precoding matrix (wtx) to be used in the transmission of the
         % first transport block
-        estChannelGrid = getInitialChannelEstimate(carrier,nTxAnts,channel);    
+        estChannelGrid = getInitialChannelEstimate(carrier,simParameters.NTxAnts,channel);    
         wtx = hSVDPrecoders(carrier,pdsch,estChannelGrid,pdschextra.PRGBundleSize);
 
         %  Progress when parallel processing is enabled

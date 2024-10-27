@@ -9,6 +9,20 @@ simParameters.SNRdB = -10:2:-6; % SNR range (dB)
 simParameters.PerfectChannelEstimator = false;
 simParameters.DisplaySimulationInformation = true;
 simParameters.DisplayDiagnostics = false;
+
+% Basic parameters
+simParameters.fc = 6e9;                         % Carrier frequency (Hz)
+simParameters.bsPosition = [23.72655331095575, 90.38926151525493]; % Base station latitude and longitude
+simParameters.bsAntSize = [8 8];                % Base station array size: rows and columns
+simParameters.bsArrayOrientation = [-30 0].';   % Base station orientation: azimuth and elevation
+simParameters.uePosition = [23.726573, 90.389586]; % User equipment latitude and longitude
+simParameters.ueAntSize = [2 2];                % User equipment array size: rows and columns
+simParameters.ueArrayOrientation = [180 45].';  % User equipment orientation: azimuth and elevation
+simParameters.reflectionsOrder = 1;             % Reflection order for ray tracing (0 for LOS)
+
+
+
+
 %% For paralell computation
 
 simParameters.enableParallelism = true;
@@ -56,16 +70,96 @@ simParameters.PDSCHExtension.LDPCDecodingAlgorithm = 'Normalized min-sum';
 simParameters.PDSCHExtension.MaximumLDPCIterationCount = 20;
 
 % Number of antennas
-simParameters.NTxAnts = 32;                                       % Number of antennas (1,2,4,8,16,32,64,128,256,512,1024) >= NumLayers
-simParameters.NRxAnts = 2;
+simParameters.NTxAnts = prod(simParameters.bsAntSize);                                       % Number of antennas (1,2,4,8,16,32,64,128,256,512,1024) >= NumLayers
+simParameters.NRxAnts = prod(simParameters.ueAntSize);
 
-% Define the general CDL propagation channel parameters
-simParameters.DelayProfile = 'CDL-A';   
-simParameters.DelaySpread = 10e-9;
-simParameters.MaximumDopplerShift = 70;
+% % Define the general CDL propagation channel parameters
+% simParameters.DelayProfile = 'CDL-A';   
+% simParameters.DelaySpread = 10e-9;
+% simParameters.MaximumDopplerShift = 70;
 
 % Cross-check the PDSCH configuration parameters against the channel geometry 
 validateParameters(simParameters);
+
+
+%% Import and Visualize 3-D Environment with Buildings for Ray Tracing
+if exist('viewer','var') && isvalid(viewer) % viewer handle exists and viewer window is open
+    clearMap(viewer);
+else
+    viewer = siteviewer("Basemap","openstreetmap","Buildings","dhaka.osm");    
+end
+%% Locate the BS and UE on the Site
+bsSite = txsite("Name", "Base station", ...
+    "Latitude", simParameters.bsPosition(1), "Longitude", simParameters.bsPosition(2), ...
+    "AntennaAngle", simParameters.bsArrayOrientation(1:2), ...
+    "AntennaHeight", 10, ...  % in meters
+    "TransmitterFrequency", simParameters.fc);
+
+ueSite = rxsite("Name", "UE", ...
+    "Latitude", simParameters.uePosition(1), "Longitude", simParameters.uePosition(2), ...
+    "AntennaHeight", 5, ...  % in meters
+    "AntennaAngle", simParameters.ueArrayOrientation(1:2));
+
+
+show(bsSite);
+show(ueSite);
+%% Perform Raytracing analysis
+
+% Define the propagation model and ray tracing
+pm = propagationModel("raytracing", "Method", "sbr", "MaxNumReflections", simParameters.reflectionsOrder);
+rays = raytrace(bsSite, ueSite, pm, "Type", "pathloss");
+plot(rays{1});
+
+% Save ray tracing results to simParameters
+simParameters.pathToAs = [rays{1}.PropagationDelay] - min([rays{1}.PropagationDelay]); % Time of arrival normalized to 0 sec
+simParameters.avgPathGains = -[rays{1}.PathLoss];                                      % Average path gains of each ray
+simParameters.pathAoDs = [rays{1}.AngleOfDeparture];                                   % AoD of each ray
+simParameters.pathAoAs = [rays{1}.AngleOfArrival];                                     % AoA of each ray
+simParameters.isLOS = any([rays{1}.LineOfSight]);                                      % LOS indicator
+
+%% Get the channel
+[channel, simParameters] = get_channel(simParameters);
+%% Plot path gains
+figure
+plot(pow2db(simParameters.pg(:,1,1,1)),'o-.');hold on
+plot(simParameters.avgPathGains,'x-.');hold off
+legend("Instantaneous (1^{st} tx - 1^{st} rx antenna)","Average (from ray tracing)")
+xlabel("Path number"); ylabel("Gain (dB)")
+title('Path gains')
+%%
+
+simParameters.pathFilters = getPathFilters(channel);
+nSlot = 0;
+[offset,~] = nrPerfectTimingEstimate(simParameters.pathGains, ...
+    simParameters.pathFilters);
+hest = nrPerfectChannelEstimate(simParameters.Carrier,simParameters.pathGains,...
+    simParameters.pathFilters,offset,simParameters.sampleTimes);
+%%
+surf(pow2db(abs(hest(:,:,1,1)).^2));
+shading('flat');
+xlabel('OFDM Symbols');ylabel('Subcarriers');zlabel('Magnitude Squared (dB)');
+title('Channel Magnitude Response (1^{st} tx - 1^{st} rx antenna)');
+
+%% Get beamforming weights
+
+nLayers = 1;
+scOffset = 0;   % no offset
+noRBs = 1;      % average channel conditions over 1 RB to calculate beamforming weights
+[wbs,wue,~] = getBeamformingWeights(hest,nLayers,scOffset,noRBs);
+
+%% Plot radiation pattern 
+
+% Plot UE radiation pattern
+ueSite.Antenna = clone(channel.ReceiveAntennaArray); % need a clone, otherwise setting the Taper weights would affect the channel array
+ueSite.Antenna.Taper = wue;
+pattern(ueSite,simParameters.fc,"Size",4);
+
+% Plot BS radiation pattern
+bsSite.Antenna = clone(channel.TransmitAntennaArray); % need a clone, otherwise setting the Taper weights would affect the channel array
+bsSite.Antenna.Taper = wbs;
+pattern(bsSite,simParameters.fc,"Size",5);
+%% Add the Channel to to simParameters
+simParameters.Channel = channel;
 %% Paralell Computing Configuration
 if (simParameters.enableParallelism && canUseParallelPool)
     pool = gcp; % create parallel pool, requires PCT
