@@ -18,6 +18,7 @@ function resultsPerWorker = pdschLink(simParameters,totalNumSlots,workerId)
         
     % Create CDL channel
     channel = simParameters.Channel;
+    
     % channel = hArrayGeometry(channel,simParameters.NTxAnts,simParameters.NRxAnts);
     % nTxAnts = prod(channel.TransmitAntennaArray.Size);
     % nRxAnts = prod(channel.ReceiveAntennaArray.Size);
@@ -62,7 +63,7 @@ function resultsPerWorker = pdschLink(simParameters,totalNumSlots,workerId)
 
         % Obtain a precoding matrix (wtx) to be used in the transmission of the
         % first transport block
-        estChannelGrid = getInitialChannelEstimate(carrier,nTxAnts,channel);    
+ .       estChannelGrid = getInitialChannelEstimate(carrier,simParameters.NTxAnts,channel);    
         wtx = hSVDPrecoders(carrier,pdsch,estChannelGrid,pdschextra.PRGBundleSize);
 
         %  Progress when parallel processing is enabled
